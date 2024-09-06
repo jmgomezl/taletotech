@@ -1,0 +1,77 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.19;
+
+import { VRFV2PlusWrapperConsumerBase } from "@chainlink/contracts/src/v0.8/vrf/dev/VRFV2PlusWrapperConsumerBase.sol";
+import { VRFV2PlusClient } from "@chainlink/contracts/src/v0.8/vrf/dev/libraries/VRFV2PlusClient.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+
+contract RandomNumberGenerator is VRFV2PlusWrapperConsumerBase, Ownable {
+    uint32 public callbackGasLimit = 100000;
+    uint16 public requestConfirmations = 3;
+    uint32 public numWords = 1;
+    uint256 public randomResult;
+    uint256 public randomNumber; // This will store the transformed random number
+
+    mapping(uint256 => address) public requestIdToSender;
+
+    event RandomWordsRequested(uint256 requestId, uint256 requestPrice);
+    event RandomNumberGenerated(uint256 requestId, uint256 randomNumber); // Event for random number
+    event RandomWordsFulfilled(uint256 requestId, uint256[] randomWords);
+
+    constructor(address _vrfWrapper) Ownable(msg.sender) VRFV2PlusWrapperConsumerBase(_vrfWrapper) {}
+
+    function requestRandomWords(bool enableNativePayment) external onlyOwner returns (uint256 requestId) {
+        bytes memory extraArgs = VRFV2PlusClient._argsToBytes(
+            VRFV2PlusClient.ExtraArgsV1({ nativePayment: enableNativePayment })
+        );
+
+        uint256 requestPrice;
+        if (enableNativePayment) {
+            (requestId, requestPrice) = requestRandomnessPayInNative(
+                callbackGasLimit,
+                requestConfirmations,
+                numWords,
+                extraArgs
+            );
+        } else {
+            (requestId, requestPrice) = requestRandomness(
+                callbackGasLimit,
+                requestConfirmations,
+                numWords,
+                extraArgs
+            );
+        }
+
+        requestIdToSender[requestId] = msg.sender;
+        emit RandomWordsRequested(requestId, requestPrice);
+
+        return requestId;
+    }
+
+    function fulfillRandomWords(uint256 requestId, uint256[] memory randomWords) internal override {
+        randomResult = randomWords[0]; // Store the first random word (raw 256-bit value)
+        
+        // Transform the random word into a smaller random number (e.g., between 1 and 100)
+        randomNumber = (randomResult % 100) + 1;
+
+        emit RandomWordsFulfilled(requestId, randomWords);
+        emit RandomNumberGenerated(requestId, randomNumber); // Emit the random number event
+    }
+
+    function getLatestRandomNumber() external view returns (uint256) {
+        return randomNumber;
+    }
+
+    // Owner functions to update parameters
+    function setCallbackGasLimit(uint32 _gasLimit) external onlyOwner {
+        callbackGasLimit = _gasLimit;
+    }
+
+    function setRequestConfirmations(uint16 _confirmations) external onlyOwner {
+        requestConfirmations = _confirmations;
+    }
+
+    function setNumWords(uint32 _numWords) external onlyOwner {
+        numWords = _numWords;
+    }
+}
