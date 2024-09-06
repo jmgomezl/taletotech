@@ -1,0 +1,67 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import "https://github.com/smartcontractkit/chainlink/blob/develop/contracts/src/v0.8/ChainlinkClient.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+
+contract APIConsumer is ChainlinkClient, Ownable {
+    using Chainlink for Chainlink.Request;
+
+    bytes public data;
+    bytes public imgdata;
+    string public image;
+    string public name;
+
+    bytes32 private jobId;
+    uint256 private fee;
+
+    /**
+     * @notice Initialize the link token and target oracle
+     * @dev The oracle address must be an Operator contract for multiword response
+     *
+     * Sepolia Testnet details:
+     * Link Token: 0x779877A7B0D9E8603169DdbD7836e478b4624789
+     * Oracle: 0xCC79157eb46F5624204f47AB42b3906cAA40eaB7 (Chainlink DevRel)
+     * jobId: 7da2702f37fd48e5b1b9a5715e3509b6
+     *
+     */
+    constructor() Ownable(msg.sender) {
+        _setChainlinkToken(0x779877A7B0D9E8603169DdbD7836e478b4624789); // Link Token Sepolia
+        _setChainlinkOracle(0xCC79157eb46F5624204f47AB42b3906cAA40eaB7); // Chainlink Oracle Sepolia
+        jobId = '7da2702f37fd48e5b1b9a5715e3509b6'; // Multiword job for reading JSON
+        fee = (1 * LINK_DIVISIBILITY) / 10; // 0.1 LINK
+    }
+
+    /**
+     * @notice Request variable bytes from the oracle
+     */
+    function requestBytes() public {
+        Chainlink.Request memory req = _buildChainlinkRequest(jobId, address(this), this.fulfillBytes.selector);
+        req.add('get', 'https://ipfs.io/ipfs/QmWBxuuuqDxjiSvHsf52bQVkQ7Sqv1dLx4DJPFZ4KdsHGZ/1.json');
+        req.add('path', 'name'); // Ruta en el JSON para obtener el nombre
+        req.add('path', 'image'); // Ruta en el JSON para obtener la imagen
+        _sendChainlinkRequest(req, fee);
+    }
+
+    event RequestFulfilled(bytes32 indexed requestId, bytes indexed data, bytes indexed imgdata);
+
+    /**
+     * @notice Fulfillment function for variable bytes
+     * @dev This is called by the oracle. recordChainlinkFulfillment must be used.
+     */
+    function fulfillBytes(bytes32 requestId, bytes memory bytesData, bytes memory imgdata_) public recordChainlinkFulfillment(requestId) {
+        emit RequestFulfilled(requestId, bytesData, imgdata_);
+        data = bytesData;
+        name = string(data); // Convierte los bytes en string para el nombre
+        imgdata = imgdata_;
+        image = string(imgdata); // Convierte los bytes en string para la imagen
+    }
+
+    /**
+     * @notice Allow withdraw of Link tokens from the contract
+     */
+    function withdrawLink() public onlyOwner {
+        LinkTokenInterface link = LinkTokenInterface(_chainlinkTokenAddress());
+        require(link.transfer(msg.sender, link.balanceOf(address(this))), 'Unable to transfer');
+    }
+}
